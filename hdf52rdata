@@ -1,0 +1,22 @@
+#!/usr/bin/Rscript
+
+if (!require('rhdf5')) {
+    if (!requireNamespace("BiocManager", quietly = TRUE))
+        install.packages("BiocManager")
+    install.packages('rhdf5')
+}
+library(rhdf5)
+
+args <- commandArgs(trailingOnly=TRUE)
+nargs <- length(args)
+
+if ((nargs < 2) | ('-h' %in% args) | ('--help' %in% args)) {
+    message('Usage: hdf52data input.h5 output.Rdata')
+} else {
+    contents <- list()
+    for (k in h5ls(args[1])$name) {
+        contents[[k]] <- h5read(args[1], k)
+    }
+    save(contents, file=args[2])
+}
+

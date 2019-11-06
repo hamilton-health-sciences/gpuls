@@ -1,0 +1,182 @@
+#!/bin/bash
+
+set -e
+
+show_help() {
+    cat <<EOF
+    gpuls v0.2.0
+
+    Usage: ${0##*/} -x X_MATRIX -y Y_VECTOR [-e E_MATRIX] [FLAGS] -o OUTPUT
+
+    Compute the GPU least squares solution for the regression y ~ X, where y is
+    a continuous phenotype and X is a (potentially large) matrix.
+
+    -x  X_MATRIX        Path to the X matrix. Valid formats are .txt, where
+                        samples are in the rows, .RData/.Rdata where it is
+                        stored as a matrix or as the only element in a named
+                        list, or in .h5 where it is the only data element.
+    -y  Y_MATRIX        Path to the Y matrix. Valid formats are .txt, where
+                        samples are in the rows, .RData/.Rdata where it is
+                        stored as a vector or as the only element in a named
+                        list, or in .h5 where it is the only data element.
+   [-e  E_MATRIX]       Optional: a path to the matrix containing Q
+                        environmental factors coded as a 0/1 or continuous
+                        matrix.
+   [-g]                 Optional: if switched, will run SLOWLY but will return
+                        the pvalues of significance tests for individual
+                        coefficients in the output key "t_p_values"
+   [-k]                 Optional: if switched, will not delete the temporary
+                        files (A and b) generated.
+   [-n]                 Optional: if switched, will include a G x E interaction
+                        term in the model, for a total of (Q + 1) * P terms.
+   [-t]                 Optional: if switched, will include the E term in the
+                        model.
+   [-i]                 Optional: if switched, will include an intercept term
+                        in the regression model.
+   [-q]                 Optional: if switched, quantile normalize the genotype
+                        term.
+   [-r]                 Optional: if switched, quantile normalize the environment
+                        term.
+   [-s]                 Optional: if switched, quantile normalize the GxE
+                        interaction term.
+   [-p]                 Optional: if switched, precondition the inputs (can be slow).
+    -o  OUTPUT          Path to the output file. Valid formats are .h5, which
+                        will have the keys: "betas" (the vector of coefficients),
+                        "ypred" (the predicted y values), "R2", the computed
+                        coefficient of determination, "adj_R2", the computed
+                        adjusted coefficient of determination, "f_statistic",
+                        the F-statistic (where the null model is just an
+                        intercept when one is included in the model, or where
+                        the null model is one with no terms in the case when
+                        there is no intercept in the model), and "f_p_value" for
+                        the corresponding p-value. Alternatively, .Rdata where
+                        the result will be a named list with the same keys as in
+                        .h5 but as names.
+    -h                  Print this help.
+EOF
+}
+
+convert_to_valid_format() {
+    echo $1;
+}
+
+KEEP_TMP=false
+SLOW=false
+OPTIND=1
+while getopts "h?x:e:y:o:intqrspg" opt; do
+    case "$opt" in
+    h|\?)
+        show_help
+        exit 0
+        ;;
+    x)
+        x_path=$OPTARG
+        ;;
+    e)
+        FLAGS="$FLAGS -e $OPTARG"
+        ;;
+    y)
+        y_path=$OPTARG
+        ;;
+    i)
+        FLAGS="$FLAGS --intercept"
+        ;;
+    n)
+        FLAGS="$FLAGS --interaction"
+        ;;
+    k)
+        KEEP_TMP=true
+        ;;
+    t)
+        FLAGS="$FLAGS --environment"
+        ;;
+    q)
+        FLAGS="$FLAGS -qx"
+        ;;
+    r)
+        FLAGS="$FLAGS -qe"
+        ;;
+    s)
+        FLAGS="$FLAGS -qi"
+        ;;
+    p)
+        FLAGS="$FLAGS -p"
+        ;;
+    o)
+        output_path=$OPTARG
+        ;;
+    g)
+        SLOW=true
+        ;;
+    esac
+done
+if [ $OPTIND -eq 1 ]; then
+    show_help
+    exit 0
+fi
+
+echo "[MESSAGE] Path to X matrix: $x_path"
+echo "[MESSAGE] Path to Y matrix: $y_path"
+echo "[MESSAGE] Path to output file: $output_path"
+
+x_path=$(convert_to_valid_format $x_path)
+y_path=$(convert_to_valid_format $y_path)
+
+echo "[MESSAGE] Getting size of X to estimate memory requirements..."
+x_size=$(wc -c < $x_path)
+echo "[MESSAGE] Size of X on disk: $x_size"
+echo "[MESSAGE] Assuming compression ratio of 32x"
+mem_req=$((x_size*32/1024/1024+5*1024)) # pad our estimate
+if (( mem_req > 650000 )); then
+    mem_req=650000
+    echo "[WARNING] Data may be too large to fit in memory, but will try anyway"
+fi
+echo "[MESSAGE] Estimated memory requirement: ${mem_req}M"
+
+echo $SLOW
+if [ "$SLOW" = false ]; then
+    echo "[MESSAGE] Computing A and b..."
+    Ab_tmp_path=`mktemp --suffix=Ab.h5`
+    gpu_guess_path=`mktemp --suffix=.gpuguess`
+    cmd="python3 /dhi_work/pub/bin/gpuls.py \
+         -X $x_path -y $y_path $FLAGS --compute-Ab -o $Ab_tmp_path -g $gpu_guess_path"
+    # echo $cmd
+    jobid=`sbatch --nodelist=lambda-server -c 12 --mem=${mem_req}M --wrap="$cmd" | awk '{print $4}'`
+
+    used_gpus=$(squeue -h -t R -O gres | awk -F':' '{s+=$2} END {print s}')
+    avail_gpus=$((8-used_gpus))
+    required_gpus=`srun --dependency=afterok:$jobid --nodelist=lambda-server --mem=1G cat $gpu_guess_path`
+
+    if (( required_gpus > 8 )); then
+        echo " [ERROR]  Not enough GPUs exist to perform this job ever! Try a smaller input matrix."
+        exit 3
+    fi
+    echo "[MESSAGE] $avail_gpus / 8 GPUs are available, need $required_gpus for LS computation"
+    if (( required_gpus > avail_gpus )); then
+        echo "[WARNING] May take a while for enough GPUs to become available"
+    fi
+
+    echo "[MESSAGE] Computing least-squares solution using conjugate gradient..."
+    jobid=`sbatch --nodelist=lambda-server -c 12 --gres=gpu:${required_gpus} \
+           --mem=${mem_req}M --wrap="python3 /dhi_work/pub/bin/gpuls.py \
+           -X $x_path -y $y_path -Ab $Ab_tmp_path $FLAGS --compute-ls -o \
+           ${output_path}.h5" | awk '{print $4}'`
+    srun --dependency=afterok:$jobid --nodelist=lambda-server -c 12 --mem=${mem_req}M \
+        hdf52rdata ${output_path}.h5 ${output_path}
+    if [ "$KEEP_TMP" = true ]; then
+        echo "[MESSAGE] Keeping temporary file at $Ab_tmp_path"
+    else
+        echo "[MESSAGE] Clearing temporary files..."
+        srun --nodelist=lambda-server -c 1 --mem=1G rm $Ab_tmp_path
+    fi
+
+    echo "[MESSAGE] Done!"
+else
+    echo "[MESSAGE] Computing matrix inverse solution..."
+    echo "[WARNING] This can be pretty slow..."
+    srun -c 12 --nodelist=lambda-server --mem=${mem_req}M python3 \
+        /dhi_work/pub/bin/gpuls.py -X $x_path -y $y_path $FLAGS \
+        --compute-slow -o ${output_path}.h5
+    srun -c 12 --nodelist=lambda-server --mem=${mem_req}M hdf52rdata ${output_path}.h5 ${output_path}
+fi
+

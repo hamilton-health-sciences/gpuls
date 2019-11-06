@@ -1,0 +1,10 @@
+__pycache__
+*.swp
+*.RData
+*.Rdata
+*.h5
+*.txt
+test.*
+*.out
+*.ipynb
+.idea

@@ -1,0 +1,25 @@
+#!/usr/bin/Rscript
+
+if (!require('rhdf5')) {
+    if (!requireNamespace("BiocManager", quietly = TRUE))
+        install.packages("BiocManager")
+    install.packages('rhdf5')
+}
+library(rhdf5)
+
+args <- commandArgs(trailingOnly=TRUE)
+nargs <- length(args)
+
+if ((nargs < 2) | ('-h' %in% args) | ('--help' %in% args)) {
+    message('Usage: rdata2hdf5 input.Rdata output.h5')
+} else {
+    contents <- get(load(args[1]))
+    if (is.matrix(contents)) {
+        h5write(t(contents), args[2], 'matrix')
+    } else {
+        for (k in names(contents)) {
+            h5write(contents[[k]], args[2], k, level=0)
+        }
+    }
+}
+
