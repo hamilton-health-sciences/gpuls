@@ -608,7 +608,6 @@ if __name__ == '__main__':
                       't_p_values': pvalue},
                      args.o)
     elif args.action == 'Ab':
-        initialize_all_gpus()
         X = torch.from_numpy(load_X(args.X, args.e, args.intercept,
                                     args.environment, args.interaction,
                                     args.quantile_g, args.quantile_gxe,
