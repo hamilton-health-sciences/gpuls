@@ -125,10 +125,9 @@ y_path=$(convert_to_valid_format $y_path)
 echo "[MESSAGE] Getting size of X to estimate memory requirements..."
 x_size=$(wc -c < $x_path)
 echo "[MESSAGE] Size of X on disk: $x_size"
-echo "[MESSAGE] Assuming compression ratio of 32x"
-mem_req=$((x_size*32/1024/1024+5*1024)) # pad our estimate
+echo "[MESSAGE] Assuming compression ratio of 128x"
+mem_req=$((x_size*128/1024/1024+5*1024)) # pad our estimate
 if (( mem_req > 650000 )); then
-    mem_req=650000
     echo "[WARNING] Data may be too large to fit in memory, but will try anyway"
 fi
 echo "[MESSAGE] Estimated memory requirement: ${mem_req}M"
@@ -142,6 +141,7 @@ if [ "$SLOW" = false ]; then
          -X $x_path -y $y_path $FLAGS --compute-Ab -o $Ab_tmp_path -g $gpu_guess_path"
     # echo $cmd
     jobid=`sbatch --nodelist=lambda-server -c 12 --mem=${mem_req}M --wrap="$cmd" | awk '{print $4}'`
+    echo "[MESSAGE] First step Slurm job ID: $jobid"
 
     used_gpus=$(squeue -h -t R -O gres | awk -F':' '{s+=$2} END {print s}')
     avail_gpus=$((8-used_gpus))
