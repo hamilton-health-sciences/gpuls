@@ -125,8 +125,8 @@ y_path=$(convert_to_valid_format $y_path)
 echo "[MESSAGE] Getting size of X to estimate memory requirements..."
 x_size=$(wc -c < $x_path)
 echo "[MESSAGE] Size of X on disk: $x_size"
-echo "[MESSAGE] Assuming compression ratio of 128x"
-mem_req=$((x_size*128/1024/1024+5*1024)) # pad our estimate
+echo "[MESSAGE] Assuming compression ratio of 160x"
+mem_req=$((x_size*160/1024/1024+5*1024)) # pad our estimate
 if (( mem_req > 650000 )); then
     echo "[WARNING] Data may be too large to fit in memory, but will try anyway"
 fi
