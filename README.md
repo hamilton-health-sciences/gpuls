@@ -24,6 +24,40 @@ nodes to send `gpuls` jobs to.
 Usage
 -----
 
+### Data formats
+
+Input files can be formatted as `.txt` (no column names permitted),
+`.Rdata`/`.RData` where the the matrix is stored as the only element in a named
+list, or as an `.h5` file where the matrix is the only data element.
+
+Missing values are not allowed.
+
+### Execution procedure
+
+First, the script computes `A = Xhat^T . Xhat`, where `Xhat` is the predictor
+matrix generated from the inputs `X` (and optionally `E`). The script then uses
+the size of `A` to estimate the number of GPUs required to complete the
+regression. The script then calls the conjugate gradient descent routine,
+splitting `A` across multiple GPUs if necessary. Once converged, the solution
+is copied back to the CPU and written to the filesystem.
+
+Intermediate files are stored in `.h5` format, and can be preserved by passing
+the `-k` flag to GPULS.
+
+### Memory considerations
+
+All matrix entries are stored as 64-bit (8 byte) floats.
+
+Matrix size limits depend generally on the total amount of CPU and GPU RAM
+available on your system. In general, sufficient CPU RAM is required to compute
+`Xhat^T . Xhat` and sufficient GPU RAM is required to store `Xhat^T . Xhat` in
+block form, possibly split across multiple GPUs. Thus, memory usage scales
+approximately quadratically with the number of predictors (i.e., `P * (E + 1)`
+where `P` is the number of columns in `X` and `E` is the number of environmental
+factors in the regression or 0 if not estimating any interaction terms).
+
+### Full documentation string
+
     $ gpuls
      gpuls v0.2.0
      Usage: gpuls -x X_MATRIX -y Y_VECTOR [-e E_MATRIX] [FLAGS] -o OUTPUT
