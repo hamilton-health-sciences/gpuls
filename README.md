@@ -10,8 +10,8 @@ Dependencies
 * [Slurm](https://slurm.schedmd.com/)
 * Python 3 (accessible using `python3`)
 * R v3.4 or higher (accessible using `R` and `Rscript`)
-* PyTorch v1.1 or higher
-* `rhdf5`
+* Python packages: PyTorch v1.1 or higher, `rpy2`
+* R packages: `rhdf5`
 
 Installation
 ------------
@@ -20,6 +20,21 @@ Place the shell scripts in the user's path. Place `gpuls.py` somewhere
 accessible to the user, and set the variable `GPULS_PY_PATH` in `gpuls`
 accordingly. Set the `NODENAME` variable to the names of the Slurm compute
 nodes to send `gpuls` jobs to.
+
+Example
+-------
+
+The following is an example GPULS command using the provided simulated data:
+
+    $ gpuls -i \
+      -x Simulated_Data/sample_data_single_block.RData \
+      -e Simulated_Data/sample_data_environmental_factor.RData \
+      -y Simulated_Data/sample_data_phenotype.RData \
+      -o Simulated_Data/gpuls_results.RData
+
+This will produce regression results in the RData file
+`Simulated_Data/gpuls_results.RData`, equivalent to a call like
+`lm(y ~ X * E)` in R.
 
 Usage
 -----
