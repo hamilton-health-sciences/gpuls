@@ -1,13 +1,51 @@
 #!/bin/bash
 
-set -e
+# Configuration options
 
+set -e
 GPULS_PY_PATH=/dhi_work/pub/bin/gpuls.py
 NODENAME=lambda-server
 
+# User messaging functions
+
+BLACK='\033[0;30m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+info_message() {
+    echo -e "${BLACK}[MESSAGE]${NC} $1"
+}
+
+warning_message() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+error_message_quit() {
+    echo -e "${RED}[ERROR]${NC} $1"
+    exit
+}
+
+debug_message() {
+    echo "[DEBUG] $1"
+}
+
+# Argument parsing & documentation
+
+validate_input_file() {
+    path=$1
+    name=$2
+    if [ -z "$path" ]; then
+        error_message_quit "You must provide an input ${name}. See 'gpuls -h' for more information."
+    fi
+    if [ ! -f "$path" ]; then
+        error_message_quit "File '${path}' not found"
+    fi
+}
+
 show_help() {
     cat <<EOF
-    gpuls v0.2.0
+    gpuls v0.2.1
 
     Usage: ${0##*/} -x X_MATRIX -y Y_VECTOR [-e E_MATRIX] [FLAGS] -o OUTPUT
 
@@ -72,17 +110,13 @@ show_help() {
 EOF
 }
 
-convert_to_valid_format() {
-    echo $1;
-}
-
 KEEP_TMP=false
 SLOW=false
 num_depvars_bound=1
 num_interxns_bound=0
 
 OPTIND=1
-while getopts "h?x:e:y:o:a:b:c:d:intqrspg" opt; do
+while getopts "h?x:e:y:o:a:b:c:d:intqrspgk" opt; do
     case "$opt" in
     h|\?)
         show_help
@@ -92,6 +126,7 @@ while getopts "h?x:e:y:o:a:b:c:d:intqrspg" opt; do
         x_path=$OPTARG
         ;;
     e)
+        includes_interaction=1
         FLAGS="$FLAGS -e $OPTARG"
         ;;
     y)
@@ -128,7 +163,6 @@ while getopts "h?x:e:y:o:a:b:c:d:intqrspg" opt; do
         SLOW=true
         ;;
     a)
-        echo num samples set
         num_samples_bound=$OPTARG
         ;;
     b)
@@ -142,37 +176,57 @@ while getopts "h?x:e:y:o:a:b:c:d:intqrspg" opt; do
         ;;
     esac
 done
+
 if [ $OPTIND -eq 1 ]; then
     show_help
     exit 0
 fi
 
-echo "[MESSAGE] Path to X matrix: $x_path"
-echo "[MESSAGE] Path to Y matrix: $y_path"
-echo "[MESSAGE] Path to output file: $output_path"
+# Input validation
 
-x_path=$(convert_to_valid_format $x_path)
-y_path=$(convert_to_valid_format $y_path)
+validate_input_file "${x_path}" "input matrix of predictors"
+validate_input_file "${y_path}" "input matrix of dependent variables"
+if [ -z "$output_path" ]; then
+    error_message_quit "You must provide an output file path."
+fi
+output_directory=`dirname "$output_path"`
+if [ ! -d "$output_directory" ]; then
+    error_message_quit "${output_directory} is not a directory."
+fi
 
-echo $num_samples_bound $num_depvars_bound
-# fallback to old heuristic
+# Informational messages and path handling
+
+info_message "Path to X matrix: $x_path"
+info_message "Path to Y matrix: $y_path"
+info_message "Path to output file: $output_path"
+
+# Estimate memory requirements for the jobs
+
 if [ -z ${num_samples_bound+x} ]; then
-    echo "[MESSAGE] Getting size of X to estimate memory requirements..."
+    # Use a heuristic around the filesize (probably bad, so warn the user)
+    warning_message "Using the size of the input matrices to estimate memory requirements. This is probably a bad idea. Use the '-a', '-b', '-c', and '-d' arguments to set the size of your input matrices instead."
+
+    info_message "Getting size of X to estimate memory requirements..."
     x_size=$(wc -c < $x_path)
-    echo "[MESSAGE] Size of X on disk: $x_size"
-    echo "[MESSAGE] Assuming compression ratio of 160x"
+    info_message "Size of X on disk: $x_size"
+    info_message "Assuming compression ratio of 160x"
     mem_req=$((x_size*160/1024/1024+5*1024)) # pad our estimate
-    if (( mem_req > 650000 )); then
-        echo "[WARNING] Data may be too large to fit in memory, but will try anyway"
+    if (( mem_req > 700000 )); then
+        warning_message "Data may be too large to fit in memory, but will try anyway"
+        mem_req=700000
     fi
-# if bounds are given on matrix sizes, use them to approximate memory needs
 else
+    # If bounds are given on matrix sizes, use them to approximate memory needs
+    if [ -z ${num_predictors_bound+x} ]; then
+        error_message_quit "If the '-a' option is given, '-b' must also be given."
+    fi
+
     x_col_size=$((num_predictors_bound*(num_interxns_bound+1)+1))
     x_size=$((num_samples_bound*x_col_size))
     y_size=$((num_samples_bound*num_depvars_bound))
-    echo "[MESSAGE] Approximate columns of Xhat = [X X*E E]: $x_col_size"
-    echo "[MESSAGE] Approximate size of Xhat = [X X*E E]: $x_size"
-    echo "[MESSAGE] Approximate size of Y: $y_size"
+    info_message "Approximate columns of Xhat = [X X*E E]: $x_col_size"
+    info_message "Approximate size of Xhat = [X X*E E]: $x_size"
+    info_message "Approximate size of Y: $y_size"
     a_size=$((x_col_size*x_col_size))
     b_size=$((num_samples_bound*num_depvars_bound))
     # size(X) + size(Y) + size(A) + size(B)
@@ -181,53 +235,57 @@ else
     mem_req=$((mem_req_els*8/1024/1024+4000))
 fi
 mem_req_gb=$((mem_req/1024))
-echo "[MESSAGE] Estimated memory requirement: ${mem_req_gb}G"
+info_message "Estimated memory requirement: ${mem_req_gb}G"
 
-echo $SLOW
 if [ "$SLOW" = false ]; then
-    echo "[MESSAGE] Computing A and b..."
+    # Compute the usual conjugate gradient least-squares solution.
+    info_message "Computing A and b..."
     Ab_tmp_path=`mktemp --suffix=Ab.h5`
     gpu_guess_path=`mktemp --suffix=.gpuguess`
     cmd="python3 $GPULS_PY_PATH \
          -X $x_path -y $y_path $FLAGS --compute-Ab -o $Ab_tmp_path -g $gpu_guess_path"
-    # echo $cmd
     jobid=`sbatch --nodelist=$NODENAME -c 12 --mem=${mem_req}M --wrap="$cmd" | awk '{print $4}'`
-    echo "[MESSAGE] First step Slurm job ID: $jobid"
+    info_message "First step Slurm job ID: $jobid"
 
     used_gpus=$(squeue -h -t R -O gres | awk -F':' '{s+=$2} END {print s}')
     avail_gpus=$((8-used_gpus))
     required_gpus=`srun --dependency=afterok:$jobid --nodelist=$NODENAME --mem=1G cat $gpu_guess_path`
 
     if (( required_gpus > 8 )); then
-        echo " [ERROR]  Not enough GPUs exist to perform this job ever! Try a smaller input matrix."
+        error_message_quit "Not enough GPUs exist to perform this job ever! Try a smaller input matrix."
         exit 3
     fi
-    echo "[MESSAGE] $avail_gpus / 8 GPUs are available, need $required_gpus for LS computation"
+    info_message "$avail_gpus / 8 GPUs are available, need $required_gpus for LS computation"
     if (( required_gpus > avail_gpus )); then
-        echo "[WARNING] May take a while for enough GPUs to become available"
+        warning_message "May take a while for enough GPUs to become available"
     fi
 
-    echo "[MESSAGE] Computing least-squares solution using conjugate gradient..."
+    info_message "Computing least-squares solution using conjugate gradient..."
     jobid=`sbatch --nodelist=$NODENAME -c 12 --gres=gpu:${required_gpus} \
            --mem=${mem_req}M --wrap="python3 $GPULS_PY_PATH \
            -X $x_path -y $y_path -Ab $Ab_tmp_path $FLAGS --compute-ls -o \
            ${output_path}.h5" | awk '{print $4}'`
-    srun --dependency=afterok:$jobid --nodelist=$NODENAME -c 12 --mem=${mem_req}M \
-        hdf52rdata ${output_path}.h5 ${output_path}
-    if [ "$KEEP_TMP" = true ]; then
-        echo "[MESSAGE] Keeping temporary file at $Ab_tmp_path"
-    else
-        echo "[MESSAGE] Clearing temporary files..."
-        srun --nodelist=$NODENAME -c 1 --mem=1G rm $Ab_tmp_path
-    fi
-
-    echo "[MESSAGE] Done!"
 else
-    echo "[MESSAGE] Computing matrix inverse solution..."
-    echo "[WARNING] This can be pretty slow..."
+    # Computes the individual p-values for beta coefficients, which means this
+    # will run very slowly.
+    info_message "Computing matrix inverse solution..."
+    warning_message "This can be pretty slow..."
     srun -c 12 --nodelist=$NODENAME --mem=${mem_req}M python3 \
         $GPULS_PY_PATH -X $x_path -y $y_path $FLAGS \
         --compute-slow -o ${output_path}.h5
     srun -c 12 --nodelist=$NODENAME --mem=${mem_req}M hdf52rdata ${output_path}.h5 ${output_path}
 fi
 
+# Convert output files and clean up temp files
+
+srun --dependency=afterok:$jobid --nodelist=$NODENAME -c 12 --mem=${mem_req}M \
+    hdf52rdata ${output_path}.h5 ${output_path}
+if [ "$KEEP_TMP" = true ]; then
+    info_message "Keeping temporary file at ${output_path}.h5"
+else
+    info_message "Clearing temporary files..."
+    if [ -f "${output_path}.h5" ]; then
+        rm ${output_path}.h5
+    fi
+fi
+info_message "Done!"

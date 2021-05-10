@@ -291,13 +291,13 @@ def beta_mgpu_block(A, b, tol=1e-16):
 
     return x_cpu
 
-def compute_required_gpus(A, b):
-    padding = A.shape[0] * 5e3
+def compute_required_gpus(A_shape):
+    padding = A_shape[0] * 5e3
     mem_avail = 10_000 * 1_000_000
     total_tensor_size = mem_avail // 8 - padding
-    split = int(total_tensor_size // A.shape[0] - 3)
+    split = int(total_tensor_size // A_shape[0] - 3)
 
-    return int(np.ceil(A.shape[0] / split))
+    return int(np.ceil(A_shape[0] / split))
 
 def precond_beta_mgpu_block(A, b, tol=1e-16):
     '''Run conjugate gradient on multiple GPUs when A = X.T . X does not fit on
@@ -620,7 +620,7 @@ if __name__ == '__main__':
         b = b_cpu(X, y)
         A /= X.shape[0]
         b /= X.shape[0]
-        ngpus_required = compute_required_gpus(A, b)
+        ngpus_required = compute_required_gpus(A.shape)
         write_output({'A': A, 'b': b}, args.o)
         if args.gpu_guess:
             with open(args.gpu_guess, 'w') as f:
