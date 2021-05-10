@@ -43,6 +43,19 @@ show_help() {
    [-s]                 Optional: if switched, quantile normalize the GxE
                         interaction term.
    [-p]                 Optional: if switched, precondition the inputs (can be slow).
+   [-a]                 Optional: if provided, this is the estimated upper bound
+                        on the number of rows (samples) in the input matrices.
+                        Required if -b is provided.
+   [-b]                 Optional: if provided, this is the estimated upper bound
+                        on the number of columns (predictors) in the input
+                        matrix X. Required if -a is provided.
+   [-c]                 Optional: if provided, this is the estimated upper bound
+                        on the number of environmental factors in the input
+                        matrix E. Defaults to 0 if -a and -b are provided and -e
+                        is not.
+   [-d]                 Optional: if provided, this is the estimated upper bound
+                        on the number of dependent variables (columns in Y). If
+                        -a and -b are provided, defaults to 1.
     -o  OUTPUT          Path to the output file. Valid formats are .h5, which
                         will have the keys: "betas" (the vector of coefficients),
                         "ypred" (the predicted y values), "R2", the computed
@@ -65,8 +78,11 @@ convert_to_valid_format() {
 
 KEEP_TMP=false
 SLOW=false
+num_depvars_bound=1
+num_interxns_bound=0
+
 OPTIND=1
-while getopts "h?x:e:y:o:intqrspg" opt; do
+while getopts "h?x:e:y:o:a:b:c:d:intqrspg" opt; do
     case "$opt" in
     h|\?)
         show_help
@@ -111,6 +127,19 @@ while getopts "h?x:e:y:o:intqrspg" opt; do
     g)
         SLOW=true
         ;;
+    a)
+        echo num samples set
+        num_samples_bound=$OPTARG
+        ;;
+    b)
+        num_predictors_bound=$OPTARG
+        ;;
+    c)
+        num_interxns_bound=$OPTARG
+        ;;
+    d)
+        num_depvars_bound=$OPTARG
+        ;;
     esac
 done
 if [ $OPTIND -eq 1 ]; then
@@ -125,15 +154,34 @@ echo "[MESSAGE] Path to output file: $output_path"
 x_path=$(convert_to_valid_format $x_path)
 y_path=$(convert_to_valid_format $y_path)
 
-echo "[MESSAGE] Getting size of X to estimate memory requirements..."
-x_size=$(wc -c < $x_path)
-echo "[MESSAGE] Size of X on disk: $x_size"
-echo "[MESSAGE] Assuming compression ratio of 160x"
-mem_req=$((x_size*160/1024/1024+5*1024)) # pad our estimate
-if (( mem_req > 650000 )); then
-    echo "[WARNING] Data may be too large to fit in memory, but will try anyway"
+echo $num_samples_bound $num_depvars_bound
+# fallback to old heuristic
+if [ -z ${num_samples_bound+x} ]; then
+    echo "[MESSAGE] Getting size of X to estimate memory requirements..."
+    x_size=$(wc -c < $x_path)
+    echo "[MESSAGE] Size of X on disk: $x_size"
+    echo "[MESSAGE] Assuming compression ratio of 160x"
+    mem_req=$((x_size*160/1024/1024+5*1024)) # pad our estimate
+    if (( mem_req > 650000 )); then
+        echo "[WARNING] Data may be too large to fit in memory, but will try anyway"
+    fi
+# if bounds are given on matrix sizes, use them to approximate memory needs
+else
+    x_col_size=$((num_predictors_bound*(num_interxns_bound+1)+1))
+    x_size=$((num_samples_bound*x_col_size))
+    y_size=$((num_samples_bound*num_depvars_bound))
+    echo "[MESSAGE] Approximate columns of Xhat = [X X*E E]: $x_col_size"
+    echo "[MESSAGE] Approximate size of Xhat = [X X*E E]: $x_size"
+    echo "[MESSAGE] Approximate size of Y: $y_size"
+    a_size=$((x_col_size*x_col_size))
+    b_size=$((num_samples_bound*num_depvars_bound))
+    # size(X) + size(Y) + size(A) + size(B)
+    mem_req_els=$((x_size + y_size + a_size + b_size))
+    # (size in MB) + (constant overhead in MB)
+    mem_req=$((mem_req_els*8/1024/1024+4000))
 fi
-echo "[MESSAGE] Estimated memory requirement: ${mem_req}M"
+mem_req_gb=$((mem_req/1024))
+echo "[MESSAGE] Estimated memory requirement: ${mem_req_gb}G"
 
 echo $SLOW
 if [ "$SLOW" = false ]; then
