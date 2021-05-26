@@ -32,7 +32,7 @@ try:
     import rpy2.robjects as robjects
 except:
     _error('Dependencies are not installed! Will try to install now...')
-    sys.call('pip3 install --user numpy scipy torch pynvml rpy2')
+    os.system('pip3 install --user numpy scipy torch pynvml rpy2')
     _message('If installation appears succesful, try running `gpuls` again.')
     sys.exit(DEPENDENCY_ERROR_CODE)
 

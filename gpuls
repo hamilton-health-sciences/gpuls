@@ -81,17 +81,17 @@ show_help() {
    [-s]                 Optional: if switched, quantile normalize the GxE
                         interaction term.
    [-p]                 Optional: if switched, precondition the inputs (can be slow).
-   [-a]                 Optional: if provided, this is the estimated upper bound
+   [-a NUM_SAMPLES]     Optional: if provided, this is the estimated upper bound
                         on the number of rows (samples) in the input matrices.
                         Required if -b is provided.
-   [-b]                 Optional: if provided, this is the estimated upper bound
+   [-b NUM_PREDICTORS]  Optional: if provided, this is the estimated upper bound
                         on the number of columns (predictors) in the input
                         matrix X. Required if -a is provided.
-   [-c]                 Optional: if provided, this is the estimated upper bound
+   [-c NUM_INTERXNS]    Optional: if provided, this is the estimated upper bound
                         on the number of environmental factors in the input
                         matrix E. Defaults to 0 if -a and -b are provided and -e
                         is not.
-   [-d]                 Optional: if provided, this is the estimated upper bound
+   [-d NUM_OUTCOMES]    Optional: if provided, this is the estimated upper bound
                         on the number of dependent variables (columns in Y). If
                         -a and -b are provided, defaults to 1.
     -o  OUTPUT          Path to the output file. Valid formats are .h5, which
