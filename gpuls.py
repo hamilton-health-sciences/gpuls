@@ -371,10 +371,16 @@ def ypred_gpu_block(X, beta):
     Returns ypred = X . beta.
     '''
     _message('Computing ypred...')
-    padding = X.shape[1] * 5e3
+    padding = X.shape[1] * 1e4
     mem_avail = np.max([available_gpu_memory(i) for i in range(number_gpus())])
-    total_tensor_size = mem_avail // 8 - padding
-    split = int(total_tensor_size // X.shape[1] - 1)
+    # Factor in number of phenotypes to this computation
+    if len(beta.shape) > 1:
+        num_pheno = beta.shape[1]
+    else:
+        num_pheno = 1
+    total_tensor_size = mem_avail // 8 - padding - X.shape[1] * num_pheno
+    split = int(total_tensor_size // (X.shape[1] + num_pheno) - 1)
+
     X_split = torch.split(X, split, dim=0)
     beta_gpu = beta.cuda()
     ypred = []
