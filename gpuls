@@ -231,8 +231,8 @@ else
     b_size=$((num_samples_bound*num_depvars_bound))
     # size(X) + size(Y) + size(A) + size(B)
     mem_req_els=$((x_size + y_size + a_size + b_size))
-    # (size in MB) + (constant overhead in MB)
-    mem_req=$((mem_req_els*8/1024/1024+4000))
+    # (size in MB) * pad_factor + (constant overhead in MB)
+    mem_req=$((mem_req_els*8/1024/1024*5/3+4000))
 fi
 mem_req_gb=$((mem_req/1024))
 info_message "Estimated memory requirement: ${mem_req_gb}G"
