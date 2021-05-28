@@ -265,15 +265,17 @@ if [ "$SLOW" = false ]; then
            --mem=${mem_req}M --wrap="python3 $GPULS_PY_PATH \
            -X $x_path -y $y_path -Ab $Ab_tmp_path $FLAGS --compute-ls -o \
            ${output_path}.h5" | awk '{print $4}'`
+    info_message "Removing temporary file ${Ab_tmp_path}"
+    srun --dependency=afterok:$jobid --nodelist=$NODENAME -c 12 --mem=1G \
+        rm $Ab_tmp_path
 else
     # Computes the individual p-values for beta coefficients, which means this
     # will run very slowly.
     info_message "Computing matrix inverse solution..."
     warning_message "This can be pretty slow..."
-    srun -c 12 --nodelist=$NODENAME --mem=${mem_req}M python3 \
-        $GPULS_PY_PATH -X $x_path -y $y_path $FLAGS \
-        --compute-slow -o ${output_path}.h5
-    srun -c 12 --nodelist=$NODENAME --mem=${mem_req}M hdf52rdata ${output_path}.h5 ${output_path}
+    jobid=`sbatch --nodelist=$NODENAME -c 12 --mem=${mem_req}M \
+           --wrap="python3 $GPULS_PY_PATH -X $x_path -y $y_path $FLAGS \
+           --compute-slow -o ${output_path}.h5" | awk '{print $4}'`
 fi
 
 # Convert output files and clean up temp files
