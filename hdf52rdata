@@ -3,9 +3,9 @@
 if (!require('rhdf5')) {
     if (!requireNamespace("BiocManager", quietly = TRUE))
         install.packages("BiocManager")
-    install.packages('rhdf5')
+    BiocManager::install("rhdf5")
 }
-library(rhdf5)
+library(rhdf5, quietly=TRUE)
 
 args <- commandArgs(trailingOnly=TRUE)
 nargs <- length(args)
