@@ -3,8 +3,7 @@
 # Configuration options
 
 set -e
-GPULS_PY_PATH=/dhi_work/pub/bin/gpuls.py
-NODENAME=lambda-server
+GPULS_PY_PATH=$HOME/gpuls/gpuls.py
 
 # User messaging functions
 
@@ -244,12 +243,10 @@ if [ "$SLOW" = false ]; then
     gpu_guess_path=`mktemp --suffix=.gpuguess`
     cmd="python3 $GPULS_PY_PATH \
          -X $x_path -y $y_path $FLAGS --compute-Ab -o $Ab_tmp_path -g $gpu_guess_path"
-    jobid=`sbatch --nodelist=$NODENAME -c 12 --mem=${mem_req}M --wrap="$cmd" | awk '{print $4}'`
-    info_message "First step Slurm job ID: $jobid"
+    $cmd
 
-    used_gpus=$(squeue -h -t R -O gres | awk -F':' '{s+=$2} END {print s}')
-    avail_gpus=$((8-used_gpus))
-    required_gpus=`srun --dependency=afterok:$jobid --nodelist=$NODENAME --mem=1G cat $gpu_guess_path`
+    avail_gpus=8
+    required_gpus=`cat $gpu_guess_path`
 
     if (( required_gpus > 8 )); then
         error_message_quit "Not enough GPUs exist to perform this job ever! Try a smaller input matrix."
@@ -261,13 +258,10 @@ if [ "$SLOW" = false ]; then
     fi
 
     info_message "Computing least-squares solution using conjugate gradient..."
-    jobid=`sbatch --nodelist=$NODENAME -c 12 --gres=gpu:${required_gpus} \
-           --mem=${mem_req}M --wrap="python3 $GPULS_PY_PATH \
-           -X $x_path -y $y_path -Ab $Ab_tmp_path $FLAGS --compute-ls -o \
-           ${output_path}.h5" | awk '{print $4}'`
+    python3 $GPULS_PY_PATH -X $x_path -y $y_path -Ab $Ab_tmp_path $FLAGS \
+        --compute-ls -o ${output_path}.h5
     info_message "Removing temporary file ${Ab_tmp_path}"
-    srun --dependency=afterok:$jobid --nodelist=$NODENAME -c 12 --mem=1G \
-        rm $Ab_tmp_path
+    rm $Ab_tmp_path
 else
     # Computes the individual p-values for beta coefficients, which means this
     # will run very slowly.
@@ -280,8 +274,7 @@ fi
 
 # Convert output files and clean up temp files
 
-srun --dependency=afterok:$jobid --nodelist=$NODENAME -c 12 --mem=${mem_req}M \
-    hdf52rdata ${output_path}.h5 ${output_path}
+hdf52rdata ${output_path}.h5 ${output_path}
 if [ "$KEEP_TMP" = true ]; then
     info_message "Keeping temporary file at ${output_path}.h5"
 else
